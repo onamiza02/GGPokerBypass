@@ -39,6 +39,24 @@ jobs:
         rm -f iPhoneOS14.5.sdk.tar.xz
         ls -la
 
+    - name: Create Preferences stub
+      run: |
+        mkdir -p theos/lib
+        cat > /tmp/Preferences.tbd <<'TBDEOF'
+        --- !tapi-tbd
+        tbd-version: 4
+        targets: [ arm64-ios, arm64e-ios ]
+        install-name: /System/Library/PrivateFrameworks/Preferences.framework/Preferences
+        current-version: 1
+        compatibility-version: 1
+        exports:
+          - targets: [ arm64-ios, arm64e-ios ]
+            objc-classes: [ PSListController, PSSpecifier, PSViewController ]
+        ...
+        TBDEOF
+        cp /tmp/Preferences.tbd theos/lib/libPreferences.tbd
+        cat theos/lib/libPreferences.tbd
+
     - name: Build Package
       run: |
         export THEOS=$(pwd)/theos
