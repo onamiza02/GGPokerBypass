@@ -32,7 +32,8 @@ jobs:
       run: |
         mkdir -p theos/sdks
         cd theos/sdks
-        wget -q https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz -O sdk.tar.xz
+        curl -sL -o sdk.tar.xz "https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz"
+        file sdk.tar.xz
         tar -xJf sdk.tar.xz
         rm -f sdk.tar.xz
         ls -la
