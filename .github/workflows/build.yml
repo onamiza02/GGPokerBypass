@@ -51,7 +51,8 @@ jobs:
         compatibility-version: 1
         exports:
           - targets: [ arm64-ios, arm64e-ios ]
-            objc-classes: [ PSListController, PSSpecifier, PSViewController ]
+            objc-classes: [ PSListController, PSSpecifier, PSViewController, PSTableCell ]
+            objc-ivars: [ PSListController._specifiers ]
         ...
         TBDEOF
         cp /tmp/Preferences.tbd theos/lib/libPreferences.tbd
