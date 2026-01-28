@@ -5,6 +5,9 @@ on:
     branches: [ master, main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -18,36 +21,29 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Setup Theos
-      uses: actions/checkout@v4
-      with:
-        repository: theos/theos
-        path: theos
-        submodules: recursive
+      uses: Randomblock1/theos-action@v1
 
-    - name: Install Dependencies
+    - name: Download Full SDK with Private Frameworks
       run: |
-        brew install ldid make xz
+        cd $THEOS/sdks
 
-    - name: Setup SDK with Private Frameworks
-      run: |
-        cd theos/sdks
+        # Clone iOS-SDKs repo (sparse checkout just for iOS 14.5)
         git clone --depth 1 --filter=blob:none --sparse https://github.com/xybp888/iOS-SDKs.git temp-sdks
         cd temp-sdks
         git sparse-checkout set iPhoneOS14.5.sdk
+
+        # Remove existing SDK with same name and move new one
+        rm -rf ../iPhoneOS14.5.sdk 2>/dev/null || true
         mv iPhoneOS14.5.sdk ../
         cd ..
         rm -rf temp-sdks
-        ls -la
-        echo "=== Checking Preferences.framework ==="
-        ls -la iPhoneOS14.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/ || echo "Preferences.framework not found in PrivateFrameworks"
-        ls -la iPhoneOS14.5.sdk/System/Library/Frameworks/Preferences.framework/ || echo "Preferences.framework not found in Frameworks"
+
+        # Verify Preferences.framework exists
+        ls -la iPhoneOS14.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/ || echo "Preferences.framework not found"
 
     - name: Build Package
       run: |
-        export THEOS=$(pwd)/theos
-        export PATH=$THEOS/bin:$PATH
-        gmake clean
-        gmake package FINALPACKAGE=1
+        make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SDKVERSION=14.5
 
     - name: Upload .deb
       uses: actions/upload-artifact@v4
@@ -58,12 +54,10 @@ jobs:
 
     - name: Create Release
       if: github.event_name == 'push'
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v1.0.${{ github.run_number }}
         name: GGPoker Bypass v1.0.${{ github.run_number }}
         files: packages/*.deb
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
