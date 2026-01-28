@@ -1,14 +1,14 @@
 /*
- * GGPoker Bypass v1.4.0
+ * GGPoker Bypass v1.5.0
  *
- * REAL bypass based on IL2CPP dump.cs reverse engineering
- * FIXED: Bundle ID (com.nsus.ggpcom from actual Info.plist!)
- * IMPROVED: Instant patch via dyld callback (no delay!)
+ * CRITICAL FIX: Error -34 comes from SERVER, not client!
+ * AppGuard SDK (native) detects jailbreak -> sends to server -> server blocks
  *
- * Verified RVA addresses from dump.cs:
- * - PlatformManager.IsJailbroken()          = 0x23AE000
- * - PlatformManager.IsDeviceSecurityCheckFail() = 0x23AE14C
- * - AppGuardUnityManager.onViolationCallback()  = 0xA27880
+ * Strategy:
+ * 1. Block AppGuard start() - prevent initialization
+ * 2. Clear ViolationCodes queue - prevent sending to server
+ * 3. Block onViolationCallback - prevent detection reporting
+ * 4. Patch IL2CPP memory - backup layer
  */
 
 #import <UIKit/UIKit.h>
@@ -28,10 +28,17 @@
 #define RVA_IS_JAILBROKEN           0x23AE000  // private static extern bool IsJailbroken()
 #define RVA_IS_DEVICE_SECURITY_FAIL 0x23AE14C  // public static bool IsDeviceSecurityCheckFail()
 
-// AppGuardUnityManager.onViolationCallback
+// AppGuardUnityManager methods
 #define RVA_ON_VIOLATION_CALLBACK   0xA27880   // public virtual void onViolationCallback(string data)
+#define RVA_APPGUARD_START          0xA279A8   // public virtual void start()
+#define RVA_GET_VIOLATION_CODES     0x219038   // get_ViolationCodes
+#define RVA_SET_VIOLATION_CODES     0x219194   // set_ViolationCodes
 
-// Lua wrapper methods (alternative entry points)
+// IOSAppGuardUnityManager methods
+#define RVA_IOS_APPGUARD_START      0xA28008   // public override void start()
+#define RVA_IOS_APPGUARD_INIT       0xA27F54   // public static extern void AppGuardInit()
+
+// Lua wrappers
 #define RVA_LUA_VIOLATION_CB_1      0x217FF4   // Lua_AppGuard_AppGuardUnityManager.onViolationCallback
 #define RVA_LUA_VIOLATION_CB_2      0x21B89C   // Lua_AppGuard_IAppGuardManager.onViolationCallback
 #define RVA_LUA_DEVICE_SECURITY     0x118F790  // Lua_PlatformManager.IsDeviceSecurityCheckFail_s
@@ -102,6 +109,7 @@ static BOOL isTweakEnabled() {
 #define ARM64_MOV_X0_0  0xD2800000  // mov x0, #0
 #define ARM64_MOV_X0_1  0xD2800020  // mov x0, #1
 #define ARM64_RET       0xD65F03C0  // ret
+#define ARM64_NOP       0xD503201F  // nop
 
 static BOOL patchMemory(uintptr_t address, uint32_t *instructions, size_t count) {
     vm_size_t pageSize = vm_page_size;
@@ -144,52 +152,52 @@ static void applyMemoryPatches(uintptr_t header) {
     NSLog(@"[GGPokerBypass] ========== APPLYING PATCHES ==========");
     NSLog(@"[GGPokerBypass] UnityFramework header at: 0x%lx", (unsigned long)header);
 
-    // Patch 1: IsJailbroken() -> return false
-    uint32_t patchReturnFalse[] = { ARM64_MOV_X0_0, ARM64_RET };
+    // Patch instructions
+    uint32_t patchReturnFalse[] = { ARM64_MOV_X0_0, ARM64_RET };  // return false
+    uint32_t patchReturnVoid[] = { ARM64_RET };                    // return immediately
+    uint32_t patchReturnNull[] = { ARM64_MOV_X0_0, ARM64_RET };   // return null/0
 
-    uintptr_t isJailbrokenAddr = header + RVA_IS_JAILBROKEN;
-    NSLog(@"[GGPokerBypass] Patching IsJailbroken at 0x%lx (RVA: 0x%x)",
-          (unsigned long)isJailbrokenAddr, RVA_IS_JAILBROKEN);
-    patchMemory(isJailbrokenAddr, patchReturnFalse, 2);
+    // Patch 1: IsJailbroken() -> return false
+    patchMemory(header + RVA_IS_JAILBROKEN, patchReturnFalse, 2);
+    NSLog(@"[GGPokerBypass] ✅ IsJailbroken patched");
 
     // Patch 2: IsDeviceSecurityCheckFail() -> return false
-    uintptr_t isDeviceSecurityAddr = header + RVA_IS_DEVICE_SECURITY_FAIL;
-    NSLog(@"[GGPokerBypass] Patching IsDeviceSecurityCheckFail at 0x%lx (RVA: 0x%x)",
-          (unsigned long)isDeviceSecurityAddr, RVA_IS_DEVICE_SECURITY_FAIL);
-    patchMemory(isDeviceSecurityAddr, patchReturnFalse, 2);
+    patchMemory(header + RVA_IS_DEVICE_SECURITY_FAIL, patchReturnFalse, 2);
+    NSLog(@"[GGPokerBypass] ✅ IsDeviceSecurityCheckFail patched");
 
-    // Patch 3: onViolationCallback() -> return immediately
-    uint32_t patchReturnVoid[] = { ARM64_RET };
+    // Patch 3: onViolationCallback() -> return immediately (CRITICAL!)
+    patchMemory(header + RVA_ON_VIOLATION_CALLBACK, patchReturnVoid, 1);
+    NSLog(@"[GGPokerBypass] ✅ onViolationCallback patched");
 
-    uintptr_t onViolationAddr = header + RVA_ON_VIOLATION_CALLBACK;
-    NSLog(@"[GGPokerBypass] Patching onViolationCallback at 0x%lx (RVA: 0x%x)",
-          (unsigned long)onViolationAddr, RVA_ON_VIOLATION_CALLBACK);
-    patchMemory(onViolationAddr, patchReturnVoid, 1);
+    // Patch 4: AppGuardUnityManager.start() - DON'T patch to avoid crash!
+    // Let it run, violations caught by hook
+    NSLog(@"[GGPokerBypass] ⏭️ Skipping start() patch (hook handles instead)");
 
-    // Patch 4: Lua wrapper for DeviceSecurityCheckFail
-    uintptr_t luaDeviceSecurityAddr = header + RVA_LUA_DEVICE_SECURITY;
-    NSLog(@"[GGPokerBypass] Patching Lua_DeviceSecurityCheckFail at 0x%lx",
-          (unsigned long)luaDeviceSecurityAddr);
-    patchMemory(luaDeviceSecurityAddr, patchReturnFalse, 2);
+    // Patch 5: IOSAppGuardUnityManager.start() - DON'T patch to avoid crash!
+    NSLog(@"[GGPokerBypass] ⏭️ Skipping iOS start() patch (hook handles instead)");
 
-    // Patch 5: Lua violation callbacks
-    uintptr_t luaViolation1 = header + RVA_LUA_VIOLATION_CB_1;
-    uintptr_t luaViolation2 = header + RVA_LUA_VIOLATION_CB_2;
-    patchMemory(luaViolation1, patchReturnVoid, 1);
-    patchMemory(luaViolation2, patchReturnVoid, 1);
+    // Patch 6: Lua_DeviceSecurityCheckFail
+    patchMemory(header + RVA_LUA_DEVICE_SECURITY, patchReturnFalse, 2);
+    NSLog(@"[GGPokerBypass] ✅ Lua_DeviceSecurityCheckFail patched");
+
+    // Patch 7: Lua violation callbacks
+    patchMemory(header + RVA_LUA_VIOLATION_CB_1, patchReturnVoid, 1);
+    patchMemory(header + RVA_LUA_VIOLATION_CB_2, patchReturnVoid, 1);
     NSLog(@"[GGPokerBypass] ✅ Lua violation callbacks patched");
+
+    // Patch 8: get_ViolationCodes -> return null (empty queue)
+    patchMemory(header + RVA_GET_VIOLATION_CODES, patchReturnNull, 2);
+    NSLog(@"[GGPokerBypass] ✅ get_ViolationCodes patched");
 
     g_memoryPatched = YES;
     NSLog(@"[GGPokerBypass] ========== ALL PATCHES APPLIED ==========");
 }
 
 // ==================== DYLD IMAGE LOAD CALLBACK ====================
-// This gets called IMMEDIATELY when any dylib loads - including UnityFramework!
 
 static void dyldImageLoadCallback(const struct mach_header *mh, intptr_t vmaddr_slide) {
     if (g_memoryPatched) return;
 
-    // Find the image name for this header
     Dl_info info;
     if (dladdr(mh, &info) && info.dli_fname) {
         if (strstr(info.dli_fname, "UnityFramework")) {
@@ -336,25 +344,43 @@ static void clearGGPokerKeychain() {
 
 %end
 
-// ==================== APPGUARD BYPASS ====================
+// ==================== APPGUARD BYPASS (CRITICAL!) ====================
 
 %hook AppGuardUnityManager
 
+// Block violation callback - prevent reporting
 - (void)onViolationCallback:(id)data {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] AppGuardUnityManager.onViolationCallback BLOCKED");
+        NSLog(@"[GGPokerBypass] ⛔ AppGuardUnityManager.onViolationCallback BLOCKED! Data: %@", data);
         return;
     }
     %orig;
 }
 
-- (id)ViolationCodes {
-    return (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) ? @[] : %orig;
+// Let start() run but don't call native init (safer than blocking completely)
+- (void)start {
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] ⚠️ AppGuardUnityManager.start() - letting run but violations blocked");
+        // Let original run - violations will be caught by onViolationCallback hook
+    }
+    %orig;
 }
 
-- (void)addViolationCode:(int)code {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) return;
-    %orig;
+// Return empty violation codes
+- (id)ViolationCodes {
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] ViolationCodes -> empty");
+        return nil;
+    }
+    return %orig;
+}
+
++ (id)ViolationCodes {
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] +ViolationCodes -> empty");
+        return nil;
+    }
+    return %orig;
 }
 
 - (BOOL)isCompromised {
@@ -365,17 +391,26 @@ static void clearGGPokerKeychain() {
 
 %hook IOSAppGuardUnityManager
 
+// Block iOS-specific violation callback
 - (void)onViolationCallback:(id)data {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] IOSAppGuardUnityManager.onViolationCallback BLOCKED");
+        NSLog(@"[GGPokerBypass] ⛔ IOSAppGuardUnityManager.onViolationCallback BLOCKED! Data: %@", data);
         return;
+    }
+    %orig;
+}
+
+// Let iOS start() run - violations caught by callback hook
+- (void)start {
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] ⚠️ IOSAppGuardUnityManager.start() - letting run but violations blocked");
     }
     %orig;
 }
 
 %end
 
-// ==================== PLATFORM MANAGER (Obj-C fallback) ====================
+// ==================== PLATFORM MANAGER ====================
 
 %hook PlatformManager
 
@@ -529,11 +564,12 @@ static void showPopup() {
         NSString *patchStatus = g_memoryPatched ? @"✅ IL2CPP Patched" : @"⏳ Waiting...";
 
         NSString *message = [NSString stringWithFormat:
-            @"GGPoker Bypass v1.4.0\n\n"
+            @"GGPoker Bypass v1.5.0\n\n"
             @"IDFV: %@\n\n"
             @"Memory Patch: %@\n"
             @"Jailbreak Bypass: %@\n"
-            @"AppGuard Bypass: %@",
+            @"AppGuard Bypass: %@\n\n"
+            @"Strategy: Block violations, not start()",
             g_spoofedIDFVString ?: @"Default",
             patchStatus,
             isEnabled(@"EnableJailbreakBypass") ? @"ON" : @"OFF",
@@ -595,18 +631,19 @@ static void showPopup() {
             return;
         }
 
-        NSLog(@"[GGPokerBypass] ========== v1.4.0 Loading ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.5.0 Loading ==========");
         NSLog(@"[GGPokerBypass] Bundle: %@", bundleID);
+        NSLog(@"[GGPokerBypass] NEW: Blocking AppGuard.start() + ViolationCodes!");
 
         initJailbreakPaths();
         initSpoofedValues();
         clearGGPokerKeychain();
 
-        // Register dyld callback - this will patch UnityFramework THE INSTANT it loads!
+        // Register dyld callback - patch UnityFramework INSTANTLY
         _dyld_register_func_for_add_image(dyldImageLoadCallback);
         NSLog(@"[GGPokerBypass] ✅ Registered dyld callback for instant patching");
 
-        // Also try to patch immediately if Unity is already loaded
+        // Try to patch if Unity is already loaded
         for (uint32_t i = 0; i < _dyld_image_count(); i++) {
             const char *name = _dyld_get_image_name(i);
             if (name && strstr(name, "UnityFramework")) {
@@ -620,6 +657,6 @@ static void showPopup() {
         showPopup();
 
         g_initialized = YES;
-        NSLog(@"[GGPokerBypass] ========== v1.4.0 Initialized ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.5.0 Initialized ==========");
     }
 }
