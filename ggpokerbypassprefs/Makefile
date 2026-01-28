@@ -5,8 +5,8 @@ BUNDLE_NAME = ggpokerbypassprefs
 
 ggpokerbypassprefs_FILES = GGPRootListController.m
 ggpokerbypassprefs_FRAMEWORKS = UIKit
-ggpokerbypassprefs_PRIVATE_FRAMEWORKS = Preferences
+ggpokerbypassprefs_LIBRARIES = Preferences
 ggpokerbypassprefs_INSTALL_PATH = /Library/PreferenceBundles
-ggpokerbypassprefs_CFLAGS = -fobjc-arc
+ggpokerbypassprefs_CFLAGS = -fobjc-arc -Wno-error
 
 include $(THEOS_MAKE_PATH)/bundle.mk
