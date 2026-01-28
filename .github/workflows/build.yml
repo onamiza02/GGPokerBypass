@@ -28,35 +28,17 @@ jobs:
       run: |
         brew install ldid make xz
 
-    - name: Setup SDK
-      env:
-        GH_TOKEN: ${{ github.token }}
+    - name: Setup SDK with Private Frameworks
       run: |
-        mkdir -p theos/sdks
         cd theos/sdks
-        gh release download master-146e41f --repo theos/sdks --pattern "iPhoneOS14.5.sdk.tar.xz"
-        tar -xJf iPhoneOS14.5.sdk.tar.xz
-        rm -f iPhoneOS14.5.sdk.tar.xz
+        git clone --depth 1 --filter=blob:none --sparse https://github.com/xybp888/iOS-SDKs.git temp-sdks
+        cd temp-sdks
+        git sparse-checkout set iPhoneOS14.5.sdk
+        mv iPhoneOS14.5.sdk ../
+        cd ..
+        rm -rf temp-sdks
         ls -la
-
-    - name: Create Preferences stub
-      run: |
-        mkdir -p theos/lib
-        cat > /tmp/Preferences.tbd <<'TBDEOF'
-        --- !tapi-tbd
-        tbd-version: 4
-        targets: [ arm64-ios, arm64e-ios ]
-        install-name: /System/Library/PrivateFrameworks/Preferences.framework/Preferences
-        current-version: 1
-        compatibility-version: 1
-        exports:
-          - targets: [ arm64-ios, arm64e-ios ]
-            objc-classes: [ PSListController, PSSpecifier, PSViewController, PSTableCell ]
-            objc-ivars: [ PSListController._specifiers ]
-        ...
-        TBDEOF
-        cp /tmp/Preferences.tbd theos/lib/libPreferences.tbd
-        cat theos/lib/libPreferences.tbd
+        ls -la iPhoneOS14.5.sdk/System/Library/PrivateFrameworks/ | head -20
 
     - name: Build Package
       run: |
