@@ -25,6 +25,7 @@
 #import <mach-o/dyld.h>
 #import <mach/mach.h>
 #import <sys/mman.h>
+#import <libkern/OSCacheControl.h>
 
 // ==================== SETTINGS ====================
 
