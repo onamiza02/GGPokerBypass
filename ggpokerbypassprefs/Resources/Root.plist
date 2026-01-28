@@ -9,9 +9,9 @@
             <key>cell</key>
             <string>PSGroupCell</string>
             <key>label</key>
-            <string>GGPoker Bypass v1.0.0</string>
+            <string>GGPoker Bypass v1.6.0</string>
             <key>footerText</key>
-            <string>Minimal &amp; Safe bypass for Error -34</string>
+            <string>Network Block + IL2CPP Bypass for Error -34</string>
         </dict>
 
         <!-- Master Toggle -->
@@ -26,6 +26,29 @@
             <string>Enabled</string>
             <key>label</key>
             <string>Enable Tweak</string>
+        </dict>
+
+        <!-- Jailbreak Bypass Section -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>⚡ Network Block (CRITICAL!)</string>
+            <key>footerText</key>
+            <string>BLOCKS AppGuard server - Most important for Error -34!</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableNetworkBlock</string>
+            <key>label</key>
+            <string>🚫 Block AppGuard Network</string>
         </dict>
 
         <!-- Jailbreak Bypass Section -->
