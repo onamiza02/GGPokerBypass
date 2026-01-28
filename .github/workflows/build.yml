@@ -1,0 +1,51 @@
+name: Build Tweak
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Theos
+      run: |
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+        echo "THEOS=~/theos" >> $GITHUB_ENV
+
+    - name: Install iOS SDK
+      run: |
+        curl -LO https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz
+        tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
+
+    - name: Build Package
+      run: |
+        export THEOS=~/theos
+        export PATH=$THEOS/bin:$PATH
+        make clean
+        make package FINALPACKAGE=1
+
+    - name: Upload .deb
+      uses: actions/upload-artifact@v4
+      with:
+        name: GGPokerBypass-deb
+        path: packages/*.deb
+
+    - name: Create Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.${{ github.run_number }}
+        name: GGPoker Bypass v1.0.${{ github.run_number }}
+        files: packages/*.deb
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
