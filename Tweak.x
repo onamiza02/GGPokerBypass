@@ -105,44 +105,17 @@ static BOOL isTweakEnabled() {
 
 // ==================== MEMORY PATCH UTILITIES ====================
 
-static uintptr_t getUnityFrameworkBase() {
-    if (g_unityBase != 0) return g_unityBase;
-
-    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        const char *name = _dyld_get_image_name(i);
-        if (name && strstr(name, "UnityFramework")) {
-            g_unityBase = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
-            NSLog(@"[GGPokerBypass] UnityFramework base: 0x%lx (slide)", (unsigned long)g_unityBase);
-
-            // Also get the actual load address
-            const struct mach_header *header = _dyld_get_image_header(i);
-            NSLog(@"[GGPokerBypass] UnityFramework header: %p", header);
-
-            return g_unityBase;
-        }
-    }
-    return 0;
-}
-
-// Get actual address = base + RVA (for extern functions, base is the header address)
+// Get UnityFramework header address for RVA calculation
 static uintptr_t getUnityFrameworkHeader() {
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
         const char *name = _dyld_get_image_name(i);
         if (name && strstr(name, "UnityFramework")) {
-            return (uintptr_t)_dyld_get_image_header(i);
+            uintptr_t header = (uintptr_t)_dyld_get_image_header(i);
+            NSLog(@"[GGPokerBypass] UnityFramework header: 0x%lx", (unsigned long)header);
+            return header;
         }
     }
     return 0;
-}
-
-static kern_return_t makeMemoryWritable(vm_address_t address, vm_size_t size) {
-    return vm_protect(mach_task_self(), address, size, NO,
-                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-}
-
-static kern_return_t restoreMemoryProtection(vm_address_t address, vm_size_t size) {
-    return vm_protect(mach_task_self(), address, size, NO,
-                      VM_PROT_READ | VM_PROT_EXECUTE);
 }
 
 // ARM64 instructions
