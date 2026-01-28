@@ -401,11 +401,15 @@ static void clearGGPokerKeychain() {
 
         // Send fake S2Auth success callback after delay
         // S2AUTH_RESULT_SUCCESS = 1
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            NSLog(@"[GGPokerBypass] ✅ Sending fake S2Auth SUCCESS callback!");
-            // Call the callback with success data
-            // Format from dump.cs: GameGuardEventType.S2Auth.S2AUTH_RESULT_SUCCESS = 1
-            [self onS2AuthTryCallback:@"{\"result\":1}"];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf) {
+                NSLog(@"[GGPokerBypass] ✅ Sending fake S2Auth SUCCESS callback!");
+                // Call the callback with success data
+                // Format from dump.cs: GameGuardEventType.S2Auth.S2AUTH_RESULT_SUCCESS = 1
+                [strongSelf onS2AuthTryCallback:@"{\"result\":1}"];
+            }
         });
 
         // DO NOT call %orig - prevents AppGuardInit()
