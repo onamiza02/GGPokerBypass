@@ -1,7 +1,8 @@
 /*
- * GGPoker Bypass v1.2.0
+ * GGPoker Bypass v1.3.0
  *
  * REAL bypass based on IL2CPP dump.cs reverse engineering
+ * FIXED: Bundle ID (com.nsus.ggpcom from actual Info.plist!)
  *
  * Verified RVA addresses from dump.cs:
  * - PlatformManager.IsJailbroken()          = 0x23AE000
@@ -558,7 +559,7 @@ static void showPopup() {
         NSString *patchStatus = g_memoryPatched ? @"✅ IL2CPP Patched" : @"⏳ Waiting...";
 
         NSString *message = [NSString stringWithFormat:
-            @"GGPoker Bypass v1.2.0\n\n"
+            @"GGPoker Bypass v1.3.0\n\n"
             @"IDFV: %@\n\n"
             @"Memory Patch: %@\n"
             @"Jailbreak Bypass: %@\n"
@@ -608,9 +609,12 @@ static void showPopup() {
     @autoreleasepool {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
 
-        BOOL isGGPoker = [bundleID isEqualToString:@"com.nsuslab.ggpoker"] ||
+        // CORRECT Bundle ID: com.nsus.ggpcom (from Info.plist)
+        BOOL isGGPoker = [bundleID isEqualToString:@"com.nsus.ggpcom"] ||
+                         [bundleID isEqualToString:@"com.nsuslab.ggpoker"] ||
                          [bundleID containsString:@"ggpoker"] ||
                          [bundleID containsString:@"ggpcom"] ||
+                         [bundleID containsString:@"nsus"] ||
                          [bundleID containsString:@"natural8"];
 
         if (!isGGPoker) return;
@@ -621,7 +625,7 @@ static void showPopup() {
             return;
         }
 
-        NSLog(@"[GGPokerBypass] ========== v1.2.0 Loading ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.3.0 Loading ==========");
         NSLog(@"[GGPokerBypass] Bundle: %@", bundleID);
 
         initJailbreakPaths();
@@ -636,6 +640,6 @@ static void showPopup() {
         showPopup();
 
         g_initialized = YES;
-        NSLog(@"[GGPokerBypass] ========== v1.2.0 Initialized ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.3.0 Initialized ==========");
     }
 }
