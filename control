@@ -1,8 +1,8 @@
 Package: com.custom.ggpokerbypass
 Name: GGPoker Bypass
-Version: 1.3.1
+Version: 1.4.0
 Architecture: iphoneos-arm64
-Description: GGPoker Error -34 Bypass - Minimal & Safe. Bypasses jailbreak detection without causing crashes.
+Description: GGPoker Error -34 Bypass - Instant dyld patching. Patches UnityFramework the moment it loads.
 Maintainer: Custom
 Author: Custom
 Section: Tweaks

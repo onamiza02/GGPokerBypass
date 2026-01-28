@@ -1,20 +1,14 @@
 /*
- * GGPoker Bypass v1.3.0
+ * GGPoker Bypass v1.4.0
  *
  * REAL bypass based on IL2CPP dump.cs reverse engineering
  * FIXED: Bundle ID (com.nsus.ggpcom from actual Info.plist!)
+ * IMPROVED: Instant patch via dyld callback (no delay!)
  *
  * Verified RVA addresses from dump.cs:
  * - PlatformManager.IsJailbroken()          = 0x23AE000
  * - PlatformManager.IsDeviceSecurityCheckFail() = 0x23AE14C
  * - AppGuardUnityManager.onViolationCallback()  = 0xA27880
- *
- * Features:
- * 1. IL2CPP Memory Patch (REAL addresses from dump.cs!)
- * 2. AppsFlyerLib jailbreak detection bypass
- * 3. AppGuard SDK violation bypass
- * 4. File path hiding
- * 5. IDFV/IDFA spoofing
  */
 
 #import <UIKit/UIKit.h>
@@ -104,19 +98,6 @@ static BOOL isTweakEnabled() {
 
 // ==================== MEMORY PATCH UTILITIES ====================
 
-// Get UnityFramework header address for RVA calculation
-static uintptr_t getUnityFrameworkHeader() {
-    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        const char *name = _dyld_get_image_name(i);
-        if (name && strstr(name, "UnityFramework")) {
-            uintptr_t header = (uintptr_t)_dyld_get_image_header(i);
-            NSLog(@"[GGPokerBypass] UnityFramework header: 0x%lx", (unsigned long)header);
-            return header;
-        }
-    }
-    return 0;
-}
-
 // ARM64 instructions
 #define ARM64_MOV_X0_0  0xD2800000  // mov x0, #0
 #define ARM64_MOV_X0_1  0xD2800020  // mov x0, #1
@@ -153,80 +134,69 @@ static BOOL patchMemory(uintptr_t address, uint32_t *instructions, size_t count)
 
 // ==================== IL2CPP MEMORY PATCHES ====================
 
-static void applyMemoryPatches() {
+static void applyMemoryPatches(uintptr_t header) {
     if (g_memoryPatched) return;
     if (!isEnabled(@"EnableMemoryPatch")) {
         NSLog(@"[GGPokerBypass] Memory patch disabled in settings");
         return;
     }
 
-    uintptr_t header = getUnityFrameworkHeader();
-    if (header == 0) {
-        NSLog(@"[GGPokerBypass] UnityFramework not found");
-        return;
-    }
-
-    NSLog(@"[GGPokerBypass] Applying memory patches...");
+    NSLog(@"[GGPokerBypass] ========== APPLYING PATCHES ==========");
     NSLog(@"[GGPokerBypass] UnityFramework header at: 0x%lx", (unsigned long)header);
 
     // Patch 1: IsJailbroken() -> return false
-    // mov x0, #0; ret
     uint32_t patchReturnFalse[] = { ARM64_MOV_X0_0, ARM64_RET };
 
     uintptr_t isJailbrokenAddr = header + RVA_IS_JAILBROKEN;
     NSLog(@"[GGPokerBypass] Patching IsJailbroken at 0x%lx (RVA: 0x%x)",
           (unsigned long)isJailbrokenAddr, RVA_IS_JAILBROKEN);
-    if (patchMemory(isJailbrokenAddr, patchReturnFalse, 2)) {
-        NSLog(@"[GGPokerBypass] ✅ IsJailbroken patched!");
-    }
+    patchMemory(isJailbrokenAddr, patchReturnFalse, 2);
 
     // Patch 2: IsDeviceSecurityCheckFail() -> return false
     uintptr_t isDeviceSecurityAddr = header + RVA_IS_DEVICE_SECURITY_FAIL;
     NSLog(@"[GGPokerBypass] Patching IsDeviceSecurityCheckFail at 0x%lx (RVA: 0x%x)",
           (unsigned long)isDeviceSecurityAddr, RVA_IS_DEVICE_SECURITY_FAIL);
-    if (patchMemory(isDeviceSecurityAddr, patchReturnFalse, 2)) {
-        NSLog(@"[GGPokerBypass] ✅ IsDeviceSecurityCheckFail patched!");
-    }
+    patchMemory(isDeviceSecurityAddr, patchReturnFalse, 2);
 
-    // Patch 3: onViolationCallback() -> return immediately (do nothing)
+    // Patch 3: onViolationCallback() -> return immediately
     uint32_t patchReturnVoid[] = { ARM64_RET };
 
     uintptr_t onViolationAddr = header + RVA_ON_VIOLATION_CALLBACK;
     NSLog(@"[GGPokerBypass] Patching onViolationCallback at 0x%lx (RVA: 0x%x)",
           (unsigned long)onViolationAddr, RVA_ON_VIOLATION_CALLBACK);
-    if (patchMemory(onViolationAddr, patchReturnVoid, 1)) {
-        NSLog(@"[GGPokerBypass] ✅ onViolationCallback patched!");
-    }
+    patchMemory(onViolationAddr, patchReturnVoid, 1);
 
     // Patch 4: Lua wrapper for DeviceSecurityCheckFail
     uintptr_t luaDeviceSecurityAddr = header + RVA_LUA_DEVICE_SECURITY;
     NSLog(@"[GGPokerBypass] Patching Lua_DeviceSecurityCheckFail at 0x%lx",
           (unsigned long)luaDeviceSecurityAddr);
-    if (patchMemory(luaDeviceSecurityAddr, patchReturnFalse, 2)) {
-        NSLog(@"[GGPokerBypass] ✅ Lua_DeviceSecurityCheckFail patched!");
-    }
+    patchMemory(luaDeviceSecurityAddr, patchReturnFalse, 2);
+
+    // Patch 5: Lua violation callbacks
+    uintptr_t luaViolation1 = header + RVA_LUA_VIOLATION_CB_1;
+    uintptr_t luaViolation2 = header + RVA_LUA_VIOLATION_CB_2;
+    patchMemory(luaViolation1, patchReturnVoid, 1);
+    patchMemory(luaViolation2, patchReturnVoid, 1);
+    NSLog(@"[GGPokerBypass] ✅ Lua violation callbacks patched");
 
     g_memoryPatched = YES;
     NSLog(@"[GGPokerBypass] ========== ALL PATCHES APPLIED ==========");
 }
 
-// Delayed patch - wait for UnityFramework to load
-static void attemptMemoryPatch() {
-    static int attempts = 0;
-    const int maxAttempts = 20;
+// ==================== DYLD IMAGE LOAD CALLBACK ====================
+// This gets called IMMEDIATELY when any dylib loads - including UnityFramework!
 
-    if (g_memoryPatched || attempts >= maxAttempts) return;
+static void dyldImageLoadCallback(const struct mach_header *mh, intptr_t vmaddr_slide) {
+    if (g_memoryPatched) return;
 
-    attempts++;
-    NSLog(@"[GGPokerBypass] Memory patch attempt %d/%d", attempts, maxAttempts);
-
-    uintptr_t header = getUnityFrameworkHeader();
-    if (header != 0) {
-        applyMemoryPatches();
-    } else {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            attemptMemoryPatch();
-        });
+    // Find the image name for this header
+    Dl_info info;
+    if (dladdr(mh, &info) && info.dli_fname) {
+        if (strstr(info.dli_fname, "UnityFramework")) {
+            NSLog(@"[GGPokerBypass] 🎯 UnityFramework LOADED! Patching immediately...");
+            uintptr_t header = (uintptr_t)mh;
+            applyMemoryPatches(header);
+        }
     }
 }
 
@@ -559,7 +529,7 @@ static void showPopup() {
         NSString *patchStatus = g_memoryPatched ? @"✅ IL2CPP Patched" : @"⏳ Waiting...";
 
         NSString *message = [NSString stringWithFormat:
-            @"GGPoker Bypass v1.3.0\n\n"
+            @"GGPoker Bypass v1.4.0\n\n"
             @"IDFV: %@\n\n"
             @"Memory Patch: %@\n"
             @"Jailbreak Bypass: %@\n"
@@ -625,21 +595,31 @@ static void showPopup() {
             return;
         }
 
-        NSLog(@"[GGPokerBypass] ========== v1.3.0 Loading ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.4.0 Loading ==========");
         NSLog(@"[GGPokerBypass] Bundle: %@", bundleID);
 
         initJailbreakPaths();
         initSpoofedValues();
         clearGGPokerKeychain();
 
-        // Start memory patch attempts (will retry until Unity loads)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            attemptMemoryPatch();
-        });
+        // Register dyld callback - this will patch UnityFramework THE INSTANT it loads!
+        _dyld_register_func_for_add_image(dyldImageLoadCallback);
+        NSLog(@"[GGPokerBypass] ✅ Registered dyld callback for instant patching");
+
+        // Also try to patch immediately if Unity is already loaded
+        for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+            const char *name = _dyld_get_image_name(i);
+            if (name && strstr(name, "UnityFramework")) {
+                uintptr_t header = (uintptr_t)_dyld_get_image_header(i);
+                NSLog(@"[GGPokerBypass] UnityFramework already loaded! Patching now...");
+                applyMemoryPatches(header);
+                break;
+            }
+        }
 
         showPopup();
 
         g_initialized = YES;
-        NSLog(@"[GGPokerBypass] ========== v1.3.0 Initialized ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.4.0 Initialized ==========");
     }
 }
