@@ -38,7 +38,9 @@ jobs:
         cd ..
         rm -rf temp-sdks
         ls -la
-        ls -la iPhoneOS14.5.sdk/System/Library/PrivateFrameworks/ | head -20
+        echo "=== Checking Preferences.framework ==="
+        ls -la iPhoneOS14.5.sdk/System/Library/PrivateFrameworks/Preferences.framework/ || echo "Preferences.framework not found in PrivateFrameworks"
+        ls -la iPhoneOS14.5.sdk/System/Library/Frameworks/Preferences.framework/ || echo "Preferences.framework not found in Frameworks"
 
     - name: Build Package
       run: |
