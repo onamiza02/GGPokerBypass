@@ -56,8 +56,6 @@ static NSString *g_spoofedIDFVString = nil;
 static NSSet *g_jailbreakPaths = nil;
 static dispatch_once_t g_pathsOnce;
 
-// UnityFramework base address
-static uintptr_t g_unityBase = 0;
 
 // ==================== SETTINGS LOADER ====================
 
