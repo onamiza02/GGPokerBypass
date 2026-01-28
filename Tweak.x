@@ -393,25 +393,11 @@ static void clearGGPokerKeychain() {
     %orig;
 }
 
-// CRITICAL: Block start() but send fake S2Auth success after delay!
+// CRITICAL: Block start() completely - no S2Auth mock needed
 - (void)start {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] 🔥 IOSAppGuardUnityManager.start() - BLOCKING AppGuardInit!");
-        NSLog(@"[GGPokerBypass] 🔥 Will send fake S2Auth SUCCESS after 2 seconds...");
-
-        // Send fake S2Auth success callback after delay
-        // S2AUTH_RESULT_SUCCESS = 1
-        __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (strongSelf) {
-                NSLog(@"[GGPokerBypass] ✅ Sending fake S2Auth SUCCESS callback!");
-                // Call the callback with success data
-                // Format from dump.cs: GameGuardEventType.S2Auth.S2AUTH_RESULT_SUCCESS = 1
-                [strongSelf onS2AuthTryCallback:@"{\"result\":1}"];
-            }
-        });
-
+        NSLog(@"[GGPokerBypass] 🔥 IOSAppGuardUnityManager.start() BLOCKED!");
+        NSLog(@"[GGPokerBypass] 🔥 AppGuardInit() will NOT be called!");
         // DO NOT call %orig - prevents AppGuardInit()
         return;
     }
