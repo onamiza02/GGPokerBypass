@@ -9,37 +9,51 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-13
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install Theos
-      run: |
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-        echo "THEOS=~/theos" >> $GITHUB_ENV
+    - name: Setup Theos
+      uses: actions/checkout@v4
+      with:
+        repository: theos/theos
+        path: theos
+        submodules: recursive
 
-    - name: Install iOS SDK
+    - name: Setup SDK
       run: |
         curl -LO https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz
-        tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
+        mkdir -p theos/sdks
+        tar -xf iPhoneOS14.5.sdk.tar.xz -C theos/sdks/
+        ls -la theos/sdks/
+
+    - name: Install Dependencies
+      run: |
+        brew install ldid make
 
     - name: Build Package
       run: |
-        export THEOS=~/theos
+        export THEOS=$(pwd)/theos
         export PATH=$THEOS/bin:$PATH
-        make clean
-        make package FINALPACKAGE=1
+        gmake clean
+        gmake package FINALPACKAGE=1
+      env:
+        THEOS: ${{ github.workspace }}/theos
+
+    - name: List packages
+      run: ls -la packages/ || echo "No packages directory"
 
     - name: Upload .deb
       uses: actions/upload-artifact@v4
       with:
         name: GGPokerBypass-deb
         path: packages/*.deb
+        if-no-files-found: error
 
     - name: Create Release
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
