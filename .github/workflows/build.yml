@@ -34,7 +34,7 @@ jobs:
       run: |
         mkdir -p theos/sdks
         cd theos/sdks
-        gh release download 14.5-v1 --repo theos/sdks --pattern "iPhoneOS14.5.sdk.tar.xz"
+        gh release download master-146e41f --repo theos/sdks --pattern "iPhoneOS14.5.sdk.tar.xz"
         tar -xJf iPhoneOS14.5.sdk.tar.xz
         rm -f iPhoneOS14.5.sdk.tar.xz
         ls -la
