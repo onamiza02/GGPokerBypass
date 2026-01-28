@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>items</key>
+    <array>
+        <!-- Header -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>GGPoker Bypass v1.0.0</string>
+            <key>footerText</key>
+            <string>Minimal &amp; Safe bypass for Error -34</string>
+        </dict>
+
+        <!-- Master Toggle -->
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>Enabled</string>
+            <key>label</key>
+            <string>Enable Tweak</string>
+        </dict>
+
+        <!-- Jailbreak Bypass Section -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Jailbreak Bypass</string>
+            <key>footerText</key>
+            <string>Core bypass features for Error -34</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableJailbreakBypass</string>
+            <key>label</key>
+            <string>Jailbreak Detection Bypass</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableAppsFlyerBypass</string>
+            <key>label</key>
+            <string>AppsFlyer Bypass</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableAppGuardBypass</string>
+            <key>label</key>
+            <string>AppGuard Bypass</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableMemoryPatch</string>
+            <key>label</key>
+            <string>Memory Patch (IL2CPP)</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableFileHiding</string>
+            <key>label</key>
+            <string>File Path Hiding</string>
+        </dict>
+
+        <!-- Device Spoofing Section -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Device Spoofing</string>
+            <key>footerText</key>
+            <string>Spoof device identifiers to bypass device bans</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableIDFVSpoof</string>
+            <key>label</key>
+            <string>Spoof IDFV</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableIDFASpoof</string>
+            <key>label</key>
+            <string>Spoof IDFA</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnableKeychainClear</string>
+            <key>label</key>
+            <string>Clear Keychain on Launch</string>
+        </dict>
+
+        <!-- Actions Section -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Actions</string>
+            <key>footerText</key>
+            <string>Manual actions (relaunch GGPoker after)</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+            <key>label</key>
+            <string>Reset IDFV (New Identity)</string>
+            <key>action</key>
+            <string>resetIDFV</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+            <key>label</key>
+            <string>Clear All Keychain Data</string>
+            <key>action</key>
+            <string>clearKeychain</string>
+        </dict>
+
+        <!-- Other Section -->
+        <dict>
+            <key>cell</key>
+            <string>PSGroupCell</string>
+            <key>label</key>
+            <string>Other</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSSwitchCell</string>
+            <key>default</key>
+            <true/>
+            <key>defaults</key>
+            <string>com.custom.ggpokerbypass</string>
+            <key>key</key>
+            <string>EnablePopup</string>
+            <key>label</key>
+            <string>Show Popup on Launch</string>
+        </dict>
+
+        <dict>
+            <key>cell</key>
+            <string>PSButtonCell</string>
+            <key>label</key>
+            <string>About</string>
+            <key>action</key>
+            <string>showAbout</string>
+        </dict>
+
+    </array>
+    <key>title</key>
+    <string>GGPoker Bypass</string>
+</dict>
+</plist>

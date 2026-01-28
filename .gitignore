@@ -1,0 +1,19 @@
+# Theos build artifacts
+.theos/
+packages/
+obj/
+*.deb
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+build/
+
+# IDE
+.vscode/
+.idea/
