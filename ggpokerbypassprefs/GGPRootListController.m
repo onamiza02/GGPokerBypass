@@ -14,6 +14,23 @@
     NSString *prefsPath = @"/var/mobile/Library/Preferences/com.custom.ggpokerbypass.plist";
     NSString *rootlessPath = @"/var/jb/var/mobile/Library/Preferences/com.custom.ggpokerbypass.plist";
 
+    // Delete saved IDFV from plist files
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:prefsPath]) {
+        NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:prefsPath];
+        if (prefs) {
+            [prefs removeObjectForKey:@"_ggbypass_idfv"];
+            [prefs writeToFile:prefsPath atomically:YES];
+        }
+    }
+    if ([fm fileExistsAtPath:rootlessPath]) {
+        NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:rootlessPath];
+        if (prefs) {
+            [prefs removeObjectForKey:@"_ggbypass_idfv"];
+            [prefs writeToFile:rootlessPath atomically:YES];
+        }
+    }
+
     // Delete saved IDFV from UserDefaults
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"_ggbypass_idfv"];
     [[NSUserDefaults standardUserDefaults] synchronize];
