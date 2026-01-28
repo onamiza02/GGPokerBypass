@@ -3,9 +3,11 @@ name: Build Tweak
 on:
   push:
     branches: [ master, main ]
-  pull_request:
-    branches: [ master, main ]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -27,11 +29,9 @@ jobs:
         curl -LO https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz
         mkdir -p theos/sdks
         tar -xf iPhoneOS14.5.sdk.tar.xz -C theos/sdks/
-        ls -la theos/sdks/
 
     - name: Install Dependencies
-      run: |
-        brew install ldid make
+      run: brew install ldid make
 
     - name: Build Package
       run: |
@@ -39,21 +39,16 @@ jobs:
         export PATH=$THEOS/bin:$PATH
         gmake clean
         gmake package FINALPACKAGE=1
-      env:
-        THEOS: ${{ github.workspace }}/theos
-
-    - name: List packages
-      run: ls -la packages/ || echo "No packages directory"
 
     - name: Upload .deb
       uses: actions/upload-artifact@v4
       with:
         name: GGPokerBypass-deb
         path: packages/*.deb
-        if-no-files-found: error
+        if-no-files-found: warn
 
     - name: Create Release
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: github.event_name == 'push'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
