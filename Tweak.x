@@ -363,9 +363,13 @@ static void clearGGPokerKeychain() {
     %orig;
 }
 
+// CRITICAL: Block start() completely to prevent AppGuardInit()!
 - (void)start {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] ⚠️ IOSAppGuardUnityManager.start()");
+        NSLog(@"[GGPokerBypass] 🔥 IOSAppGuardUnityManager.start() COMPLETELY BLOCKED!");
+        NSLog(@"[GGPokerBypass] 🔥 AppGuardInit() will NOT be called!");
+        // DO NOT call %orig - this prevents native AppGuard initialization!
+        return;
     }
     %orig;
 }
