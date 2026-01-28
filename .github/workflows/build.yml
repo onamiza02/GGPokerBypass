@@ -29,13 +29,14 @@ jobs:
         brew install ldid make xz
 
     - name: Setup SDK
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         mkdir -p theos/sdks
         cd theos/sdks
-        curl -sL -o sdk.tar.xz "https://github.com/theos/sdks/releases/download/14.5-v1/iPhoneOS14.5.sdk.tar.xz"
-        file sdk.tar.xz
-        tar -xJf sdk.tar.xz
-        rm -f sdk.tar.xz
+        gh release download 14.5-v1 --repo theos/sdks --pattern "iPhoneOS14.5.sdk.tar.xz"
+        tar -xJf iPhoneOS14.5.sdk.tar.xz
+        rm -f iPhoneOS14.5.sdk.tar.xz
         ls -la
 
     - name: Build Package
