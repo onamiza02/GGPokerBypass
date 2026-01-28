@@ -1,24 +1,19 @@
 /*
- * GGPoker Bypass v1.1.0
+ * GGPoker Bypass v1.2.0
  *
- * Safe tweak to bypass Error -34 on GGPoker
+ * REAL bypass based on IL2CPP dump.cs reverse engineering
  *
- * v1.1.0 Changes:
- * - Removed IL2CPP Memory Patch (RVA addresses unknown)
- * - Added more AppGuard/GameGuard class hooks
- * - Added stat/access C hooks (safe version)
- * - Added Environment variable hiding
- * - Fixed popup not showing
+ * Verified RVA addresses from dump.cs:
+ * - PlatformManager.IsJailbroken()          = 0x23AE000
+ * - PlatformManager.IsDeviceSecurityCheckFail() = 0x23AE14C
+ * - AppGuardUnityManager.onViolationCallback()  = 0xA27880
  *
  * Features:
- * 1. AppsFlyerLib jailbreak detection bypass
- * 2. AppGuard SDK violation bypass
- * 3. File path hiding (NSFileManager + stat/access)
- * 4. URL scheme hiding (cydia://, sileo://)
- * 5. Environment variable hiding
- * 6. IDFV/IDFA spoofing (optional)
- *
- * NO aggressive dyld hooks = NO CRASH!
+ * 1. IL2CPP Memory Patch (REAL addresses from dump.cs!)
+ * 2. AppsFlyerLib jailbreak detection bypass
+ * 3. AppGuard SDK violation bypass
+ * 4. File path hiding
+ * 5. IDFV/IDFA spoofing
  */
 
 #import <UIKit/UIKit.h>
@@ -28,30 +23,49 @@
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <sys/stat.h>
+#import <mach-o/dyld.h>
+#import <mach/mach.h>
+#import <libkern/OSCacheControl.h>
+
+// ==================== VERIFIED RVA ADDRESSES (from dump.cs) ====================
+
+// PlatformManager class methods
+#define RVA_IS_JAILBROKEN           0x23AE000  // private static extern bool IsJailbroken()
+#define RVA_IS_DEVICE_SECURITY_FAIL 0x23AE14C  // public static bool IsDeviceSecurityCheckFail()
+
+// AppGuardUnityManager.onViolationCallback
+#define RVA_ON_VIOLATION_CALLBACK   0xA27880   // public virtual void onViolationCallback(string data)
+
+// Lua wrapper methods (alternative entry points)
+#define RVA_LUA_VIOLATION_CB_1      0x217FF4   // Lua_AppGuard_AppGuardUnityManager.onViolationCallback
+#define RVA_LUA_VIOLATION_CB_2      0x21B89C   // Lua_AppGuard_IAppGuardManager.onViolationCallback
+#define RVA_LUA_DEVICE_SECURITY     0x118F790  // Lua_PlatformManager.IsDeviceSecurityCheckFail_s
 
 // ==================== SETTINGS ====================
 
 static NSDictionary *g_settings = nil;
 static BOOL g_initialized = NO;
+static BOOL g_memoryPatched = NO;
 
 // Spoofed values
 static NSUUID *g_spoofedIDFV = nil;
 static NSUUID *g_spoofedIDFA = nil;
 static NSString *g_spoofedIDFVString = nil;
 
-// Jailbreak paths (lazy loaded)
+// Jailbreak paths
 static NSSet *g_jailbreakPaths = nil;
 static dispatch_once_t g_pathsOnce;
+
+// UnityFramework base address
+static uintptr_t g_unityBase = 0;
 
 // ==================== SETTINGS LOADER ====================
 
 static NSString *getPreferencesPath() {
-    // Rootless (Dopamine/Palera1n)
     NSString *rootless = @"/var/jb/var/mobile/Library/Preferences/com.custom.ggpokerbypass.plist";
     if ([[NSFileManager defaultManager] fileExistsAtPath:rootless]) {
         return rootless;
     }
-    // Rootful
     return @"/var/mobile/Library/Preferences/com.custom.ggpokerbypass.plist";
 }
 
@@ -63,12 +77,12 @@ static void loadSettings() {
         if (file) {
             g_settings = [file copy];
         } else {
-            // Defaults - all enabled
             g_settings = @{
                 @"Enabled": @YES,
                 @"EnableJailbreakBypass": @YES,
                 @"EnableAppsFlyerBypass": @YES,
                 @"EnableAppGuardBypass": @YES,
+                @"EnableMemoryPatch": @YES,
                 @"EnableIDFVSpoof": @YES,
                 @"EnableIDFASpoof": @YES,
                 @"EnableKeychainClear": @YES,
@@ -89,12 +103,166 @@ static BOOL isTweakEnabled() {
     return isEnabled(@"Enabled");
 }
 
-// ==================== JAILBREAK PATHS (LAZY) ====================
+// ==================== MEMORY PATCH UTILITIES ====================
+
+static uintptr_t getUnityFrameworkBase() {
+    if (g_unityBase != 0) return g_unityBase;
+
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && strstr(name, "UnityFramework")) {
+            g_unityBase = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
+            NSLog(@"[GGPokerBypass] UnityFramework base: 0x%lx (slide)", (unsigned long)g_unityBase);
+
+            // Also get the actual load address
+            const struct mach_header *header = _dyld_get_image_header(i);
+            NSLog(@"[GGPokerBypass] UnityFramework header: %p", header);
+
+            return g_unityBase;
+        }
+    }
+    return 0;
+}
+
+// Get actual address = base + RVA (for extern functions, base is the header address)
+static uintptr_t getUnityFrameworkHeader() {
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && strstr(name, "UnityFramework")) {
+            return (uintptr_t)_dyld_get_image_header(i);
+        }
+    }
+    return 0;
+}
+
+static kern_return_t makeMemoryWritable(vm_address_t address, vm_size_t size) {
+    return vm_protect(mach_task_self(), address, size, NO,
+                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+}
+
+static kern_return_t restoreMemoryProtection(vm_address_t address, vm_size_t size) {
+    return vm_protect(mach_task_self(), address, size, NO,
+                      VM_PROT_READ | VM_PROT_EXECUTE);
+}
+
+// ARM64 instructions
+#define ARM64_MOV_X0_0  0xD2800000  // mov x0, #0
+#define ARM64_MOV_X0_1  0xD2800020  // mov x0, #1
+#define ARM64_RET       0xD65F03C0  // ret
+
+static BOOL patchMemory(uintptr_t address, uint32_t *instructions, size_t count) {
+    vm_size_t pageSize = vm_page_size;
+    vm_address_t pageStart = (address / pageSize) * pageSize;
+    vm_size_t size = count * sizeof(uint32_t);
+
+    // Make writable
+    kern_return_t kr = vm_protect(mach_task_self(), pageStart, pageSize, NO,
+                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (kr != KERN_SUCCESS) {
+        NSLog(@"[GGPokerBypass] vm_protect WRITE failed at 0x%lx: %d", (unsigned long)address, kr);
+        return NO;
+    }
+
+    // Write instructions
+    for (size_t i = 0; i < count; i++) {
+        *((volatile uint32_t *)(address + i * 4)) = instructions[i];
+    }
+
+    // Restore protection
+    vm_protect(mach_task_self(), pageStart, pageSize, NO,
+               VM_PROT_READ | VM_PROT_EXECUTE);
+
+    // Clear instruction cache
+    sys_icache_invalidate((void *)address, size);
+
+    NSLog(@"[GGPokerBypass] ✅ Patched at 0x%lx", (unsigned long)address);
+    return YES;
+}
+
+// ==================== IL2CPP MEMORY PATCHES ====================
+
+static void applyMemoryPatches() {
+    if (g_memoryPatched) return;
+    if (!isEnabled(@"EnableMemoryPatch")) {
+        NSLog(@"[GGPokerBypass] Memory patch disabled in settings");
+        return;
+    }
+
+    uintptr_t header = getUnityFrameworkHeader();
+    if (header == 0) {
+        NSLog(@"[GGPokerBypass] UnityFramework not found");
+        return;
+    }
+
+    NSLog(@"[GGPokerBypass] Applying memory patches...");
+    NSLog(@"[GGPokerBypass] UnityFramework header at: 0x%lx", (unsigned long)header);
+
+    // Patch 1: IsJailbroken() -> return false
+    // mov x0, #0; ret
+    uint32_t patchReturnFalse[] = { ARM64_MOV_X0_0, ARM64_RET };
+
+    uintptr_t isJailbrokenAddr = header + RVA_IS_JAILBROKEN;
+    NSLog(@"[GGPokerBypass] Patching IsJailbroken at 0x%lx (RVA: 0x%x)",
+          (unsigned long)isJailbrokenAddr, RVA_IS_JAILBROKEN);
+    if (patchMemory(isJailbrokenAddr, patchReturnFalse, 2)) {
+        NSLog(@"[GGPokerBypass] ✅ IsJailbroken patched!");
+    }
+
+    // Patch 2: IsDeviceSecurityCheckFail() -> return false
+    uintptr_t isDeviceSecurityAddr = header + RVA_IS_DEVICE_SECURITY_FAIL;
+    NSLog(@"[GGPokerBypass] Patching IsDeviceSecurityCheckFail at 0x%lx (RVA: 0x%x)",
+          (unsigned long)isDeviceSecurityAddr, RVA_IS_DEVICE_SECURITY_FAIL);
+    if (patchMemory(isDeviceSecurityAddr, patchReturnFalse, 2)) {
+        NSLog(@"[GGPokerBypass] ✅ IsDeviceSecurityCheckFail patched!");
+    }
+
+    // Patch 3: onViolationCallback() -> return immediately (do nothing)
+    uint32_t patchReturnVoid[] = { ARM64_RET };
+
+    uintptr_t onViolationAddr = header + RVA_ON_VIOLATION_CALLBACK;
+    NSLog(@"[GGPokerBypass] Patching onViolationCallback at 0x%lx (RVA: 0x%x)",
+          (unsigned long)onViolationAddr, RVA_ON_VIOLATION_CALLBACK);
+    if (patchMemory(onViolationAddr, patchReturnVoid, 1)) {
+        NSLog(@"[GGPokerBypass] ✅ onViolationCallback patched!");
+    }
+
+    // Patch 4: Lua wrapper for DeviceSecurityCheckFail
+    uintptr_t luaDeviceSecurityAddr = header + RVA_LUA_DEVICE_SECURITY;
+    NSLog(@"[GGPokerBypass] Patching Lua_DeviceSecurityCheckFail at 0x%lx",
+          (unsigned long)luaDeviceSecurityAddr);
+    if (patchMemory(luaDeviceSecurityAddr, patchReturnFalse, 2)) {
+        NSLog(@"[GGPokerBypass] ✅ Lua_DeviceSecurityCheckFail patched!");
+    }
+
+    g_memoryPatched = YES;
+    NSLog(@"[GGPokerBypass] ========== ALL PATCHES APPLIED ==========");
+}
+
+// Delayed patch - wait for UnityFramework to load
+static void attemptMemoryPatch() {
+    static int attempts = 0;
+    const int maxAttempts = 20;
+
+    if (g_memoryPatched || attempts >= maxAttempts) return;
+
+    attempts++;
+    NSLog(@"[GGPokerBypass] Memory patch attempt %d/%d", attempts, maxAttempts);
+
+    uintptr_t header = getUnityFrameworkHeader();
+    if (header != 0) {
+        applyMemoryPatches();
+    } else {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            attemptMemoryPatch();
+        });
+    }
+}
+
+// ==================== JAILBREAK PATHS ====================
 
 static void initJailbreakPaths() {
     dispatch_once(&g_pathsOnce, ^{
         g_jailbreakPaths = [NSSet setWithArray:@[
-            // Core jailbreak indicators
             @"/var/jb",
             @"/private/var/jb",
             @"/Applications/Cydia.app",
@@ -112,17 +280,14 @@ static void initJailbreakPaths() {
             @"/.bootstrapped_electra",
             @"/.procursus_strapped",
             @"/.bootstrapped",
-            // Rootless
             @"/var/jb/Applications/Cydia.app",
             @"/var/jb/Applications/Sileo.app",
             @"/var/jb/usr/lib/libellekit.dylib",
             @"/var/jb/Library/MobileSubstrate",
             @"/var/jb/basebin",
             @"/var/jb/bin/bash",
-            // Frida
             @"/usr/sbin/frida-server",
             @"/usr/bin/frida-server",
-            // Palera1n
             @"/cores/binpack",
             @"/cores/jbloader"
         ]];
@@ -133,15 +298,11 @@ static BOOL isJailbreakPath(NSString *path) {
     if (!path) return NO;
     initJailbreakPaths();
 
-    // Exact match
     if ([g_jailbreakPaths containsObject:path]) return YES;
-
-    // Prefix match for /var/jb
     if ([path hasPrefix:@"/var/jb/"] || [path hasPrefix:@"/private/var/jb/"]) return YES;
 
-    // Substring match for sensitive keywords
     NSString *lowercasePath = [path lowercaseString];
-    NSArray *keywords = @[@"substrate", @"substitute", @"ellekit", @"libhooker", @"cycript", @"frida", @"cynject", @"mobilesubstrate"];
+    NSArray *keywords = @[@"substrate", @"substitute", @"ellekit", @"libhooker", @"cycript", @"frida", @"cynject"];
     for (NSString *keyword in keywords) {
         if ([lowercasePath containsString:keyword]) return YES;
     }
@@ -151,8 +312,7 @@ static BOOL isJailbreakPath(NSString *path) {
 
 static BOOL isJailbreakPathC(const char *path) {
     if (!path) return NO;
-    NSString *pathStr = [NSString stringWithUTF8String:path];
-    return isJailbreakPath(pathStr);
+    return isJailbreakPath([NSString stringWithUTF8String:path]);
 }
 
 // ==================== SPOOFED VALUES ====================
@@ -161,7 +321,6 @@ static void initSpoofedValues() {
     if (g_spoofedIDFV) return;
 
     @autoreleasepool {
-        // Load or generate IDFV
         NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"_ggbypass_idfv"];
         if (saved) {
             g_spoofedIDFV = [[NSUUID alloc] initWithUUIDString:saved];
@@ -172,8 +331,6 @@ static void initSpoofedValues() {
             [[NSUserDefaults standardUserDefaults] synchronize];
         }
         g_spoofedIDFVString = [g_spoofedIDFV UUIDString];
-
-        // IDFA - random each session
         g_spoofedIDFA = [NSUUID UUID];
 
         NSLog(@"[GGPokerBypass] Spoofed IDFV: %@", g_spoofedIDFVString);
@@ -195,45 +352,28 @@ static void clearGGPokerKeychain() {
 
             for (id secClass in secClasses) {
                 NSDictionary *query = @{ (__bridge id)kSecClass: secClass };
-                OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
-                if (status == errSecSuccess) {
-                    NSLog(@"[GGPokerBypass] Keychain cleared for class");
-                }
+                SecItemDelete((__bridge CFDictionaryRef)query);
             }
-            NSLog(@"[GGPokerBypass] Keychain clear complete");
+            NSLog(@"[GGPokerBypass] Keychain cleared");
         }
     });
 }
 
-// ==================== APPSFLYER BYPASS (CRITICAL!) ====================
+// ==================== APPSFLYER BYPASS ====================
 
 %hook AppsFlyerLib
 
-// Main jailbreak detection method
 - (BOOL)isJailbrokenWithSkipAdvancedJailbreakValidation:(BOOL)skip {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
+    if (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) {
+        NSLog(@"[GGPokerBypass] AppsFlyerLib.isJailbroken -> NO");
+        return NO;
     }
-    NSLog(@"[GGPokerBypass] AppsFlyerLib.isJailbroken -> NO");
-    return NO;
+    return %orig;
 }
 
-// Alternative method names (different SDK versions)
-- (BOOL)isJailBroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
-    }
-    return NO;
-}
+- (BOOL)isJailBroken { return (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) ? NO : %orig; }
+- (BOOL)isJailbroken { return (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) ? NO : %orig; }
 
-- (BOOL)isJailbroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
-    }
-    return NO;
-}
-
-// Force skip validation
 - (void)setSkipAdvancedJailbreakValidation:(BOOL)skip {
     if (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) {
         %orig(YES);
@@ -242,36 +382,15 @@ static void clearGGPokerKeychain() {
     %orig;
 }
 
-// Disable debug detection
-- (BOOL)isDebug {
-    return NO;
-}
-
 %end
 
-// Alternative class name
 %hook AppsFlyerTracker
 
 - (BOOL)isJailbrokenWithSkipAdvancedJailbreakValidation:(BOOL)skip {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
-    }
-    return NO;
+    return (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) ? NO : %orig;
 }
-
-- (BOOL)isJailBroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
-    }
-    return NO;
-}
-
-- (BOOL)isJailbroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppsFlyerBypass")) {
-        return %orig;
-    }
-    return NO;
-}
+- (BOOL)isJailBroken { return (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) ? NO : %orig; }
+- (BOOL)isJailbroken { return (isTweakEnabled() && isEnabled(@"EnableAppsFlyerBypass")) ? NO : %orig; }
 
 %end
 
@@ -279,117 +398,34 @@ static void clearGGPokerKeychain() {
 
 %hook AppGuardUnityManager
 
-- (void)onViolationCallback:(int)code {
-    if (!isTweakEnabled() || !isEnabled(@"EnableAppGuardBypass")) {
-        %orig;
-        return;
-    }
-    NSLog(@"[GGPokerBypass] AppGuardUnityManager.onViolationCallback BLOCKED: %d", code);
-    // Block - don't report violation
-}
-
-- (void)onViolation:(int)code {
+- (void)onViolationCallback:(id)data {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] AppGuardUnityManager.onViolation BLOCKED: %d", code);
+        NSLog(@"[GGPokerBypass] AppGuardUnityManager.onViolationCallback BLOCKED");
         return;
     }
     %orig;
 }
 
 - (id)ViolationCodes {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        return @[];  // Empty array
-    }
-    return %orig;
+    return (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) ? @[] : %orig;
 }
 
 - (void)addViolationCode:(int)code {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        return;  // Don't add
-    }
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) return;
     %orig;
 }
 
 - (BOOL)isCompromised {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        return NO;
-    }
-    return %orig;
+    return (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) ? NO : %orig;
 }
 
 %end
 
-// Alternative class names used by AppGuard SDK
-%hook AppGuard
+%hook IOSAppGuardUnityManager
 
-- (void)onViolation:(int)code {
+- (void)onViolationCallback:(id)data {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] AppGuard.onViolation BLOCKED: %d", code);
-        return;
-    }
-    %orig;
-}
-
-- (BOOL)isCompromised {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)detectJailbreak {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-%end
-
-%hook GameGuard
-
-- (void)reportViolation:(int)code {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        return;
-    }
-    %orig;
-}
-
-- (BOOL)detectJailbreak {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)isJailbroken {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-%end
-
-// AppGuard Security Manager
-%hook SecurityManager
-
-- (BOOL)isJailbroken {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)isDeviceCompromised {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (void)reportSecurityViolation:(int)code {
-    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] IOSAppGuardUnityManager.onViolationCallback BLOCKED");
         return;
     }
     %orig;
@@ -397,81 +433,15 @@ static void clearGGPokerKeychain() {
 
 %end
 
-// ==================== UNITY PLATFORM MANAGER ====================
+// ==================== PLATFORM MANAGER (Obj-C fallback) ====================
 
 %hook PlatformManager
 
-- (BOOL)IsJailbroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    NSLog(@"[GGPokerBypass] PlatformManager.IsJailbroken -> NO");
-    return NO;
-}
-
-- (BOOL)IsDeviceSecurityCheckFail {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    NSLog(@"[GGPokerBypass] PlatformManager.IsDeviceSecurityCheckFail -> NO");
-    return NO;
-}
-
-+ (BOOL)IsJailbroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    return NO;
-}
-
-+ (BOOL)IsDeviceSecurityCheckFail {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    return NO;
-}
-
-- (BOOL)isJailbroken {
-    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
-        return NO;
-    }
-    return %orig;
-}
-
-%end
-
-// ==================== GENERIC JAILBREAK CHECKS ====================
-
-%hook NSObject
-
-// Many SDKs call these via reflection
-- (BOOL)isJailbroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    // Only intercept if method actually does jailbreak check
-    NSString *className = NSStringFromClass([self class]);
-    if ([className containsString:@"Security"] ||
-        [className containsString:@"Guard"] ||
-        [className containsString:@"Platform"] ||
-        [className containsString:@"Device"]) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)isJailBroken {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-    NSString *className = NSStringFromClass([self class]);
-    if ([className containsString:@"Security"] ||
-        [className containsString:@"Guard"] ||
-        [className containsString:@"Platform"]) {
-        return NO;
-    }
-    return %orig;
-}
+- (BOOL)IsJailbroken { return (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) ? NO : %orig; }
+- (BOOL)IsDeviceSecurityCheckFail { return (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) ? NO : %orig; }
++ (BOOL)IsJailbroken { return (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) ? NO : %orig; }
++ (BOOL)IsDeviceSecurityCheckFail { return (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) ? NO : %orig; }
+- (BOOL)isJailbroken { return (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) ? NO : %orig; }
 
 %end
 
@@ -480,11 +450,11 @@ static void clearGGPokerKeychain() {
 %hook UIDevice
 
 - (NSUUID *)identifierForVendor {
-    if (!isTweakEnabled() || !isEnabled(@"EnableIDFVSpoof")) {
-        return %orig;
+    if (isTweakEnabled() && isEnabled(@"EnableIDFVSpoof")) {
+        initSpoofedValues();
+        return g_spoofedIDFV;
     }
-    initSpoofedValues();
-    return g_spoofedIDFV;
+    return %orig;
 }
 
 %end
@@ -494,88 +464,53 @@ static void clearGGPokerKeychain() {
 %hook ASIdentifierManager
 
 - (NSUUID *)advertisingIdentifier {
-    if (!isTweakEnabled() || !isEnabled(@"EnableIDFASpoof")) {
-        return %orig;
+    if (isTweakEnabled() && isEnabled(@"EnableIDFASpoof")) {
+        initSpoofedValues();
+        return g_spoofedIDFA;
     }
-    initSpoofedValues();
-    return g_spoofedIDFA;
+    return %orig;
 }
 
 - (BOOL)isAdvertisingTrackingEnabled {
-    if (isTweakEnabled() && isEnabled(@"EnableIDFASpoof")) {
-        return NO;
-    }
-    return %orig;
+    return (isTweakEnabled() && isEnabled(@"EnableIDFASpoof")) ? NO : %orig;
 }
 
 %end
 
-// ==================== FILE SYSTEM BYPASS (NSFileManager) ====================
+// ==================== FILE SYSTEM BYPASS ====================
 
 %hook NSFileManager
 
 - (BOOL)fileExistsAtPath:(NSString *)path {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        return NO;
-    }
+    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) return NO;
     return %orig;
 }
 
 - (BOOL)fileExistsAtPath:(NSString *)path isDirectory:(BOOL *)isDirectory {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        return NO;
-    }
+    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) return NO;
     return %orig;
 }
 
 - (BOOL)isReadableFileAtPath:(NSString *)path {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)isWritableFileAtPath:(NSString *)path {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)isExecutableFileAtPath:(NSString *)path {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        return NO;
-    }
-    return %orig;
-}
-
-- (NSDictionary *)attributesOfItemAtPath:(NSString *)path error:(NSError **)error {
-    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) {
-        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
-        return nil;
-    }
+    if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPath(path)) return NO;
     return %orig;
 }
 
 - (NSArray *)contentsOfDirectoryAtPath:(NSString *)path error:(NSError **)error {
     NSArray *contents = %orig;
-    if (!isTweakEnabled() || !isEnabled(@"EnableFileHiding") || !contents) {
-        return contents;
-    }
+    if (!isTweakEnabled() || !isEnabled(@"EnableFileHiding") || !contents) return contents;
 
     NSMutableArray *filtered = [NSMutableArray array];
     for (NSString *item in contents) {
         NSString *fullPath = [path stringByAppendingPathComponent:item];
-        if (!isJailbreakPath(fullPath)) {
-            [filtered addObject:item];
-        }
+        if (!isJailbreakPath(fullPath)) [filtered addObject:item];
     }
     return filtered;
 }
 
 %end
 
-// ==================== C FUNCTION HOOKS (stat, access) ====================
+// ==================== C FUNCTION HOOKS ====================
 
 %hookf(int, stat, const char *path, struct stat *buf) {
     if (isTweakEnabled() && isEnabled(@"EnableFileHiding") && isJailbreakPathC(path)) {
@@ -614,16 +549,11 @@ static void clearGGPokerKeychain() {
 %hook UIApplication
 
 - (BOOL)canOpenURL:(NSURL *)url {
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return %orig;
-    }
-
-    NSString *scheme = [[url scheme] lowercaseString];
-    NSArray *blocked = @[@"cydia", @"sileo", @"zbra", @"filza", @"activator", @"undecimus", @"ssh", @"apt"];
-
-    for (NSString *s in blocked) {
-        if ([scheme isEqualToString:s]) {
-            return NO;
+    if (isTweakEnabled() && isEnabled(@"EnableJailbreakBypass")) {
+        NSString *scheme = [[url scheme] lowercaseString];
+        NSArray *blocked = @[@"cydia", @"sileo", @"zbra", @"filza", @"activator", @"undecimus", @"ssh", @"apt"];
+        for (NSString *s in blocked) {
+            if ([scheme isEqualToString:s]) return NO;
         }
     }
     return %orig;
@@ -631,51 +561,22 @@ static void clearGGPokerKeychain() {
 
 %end
 
-// ==================== NSBUNDLE BYPASS ====================
-
-%hook NSBundle
-
-- (id)objectForInfoDictionaryKey:(NSString *)key {
-    id result = %orig;
-    if (!isTweakEnabled()) return result;
-
-    // Hide signer identity
-    if ([key isEqualToString:@"SignerIdentity"]) {
-        return nil;
-    }
-    return result;
-}
-
-%end
-
-// ==================== PROCESS INFO (Hide env vars) ====================
+// ==================== ENVIRONMENT BYPASS ====================
 
 %hook NSProcessInfo
 
 - (NSDictionary *)environment {
     NSDictionary *env = %orig;
-    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) {
-        return env;
-    }
+    if (!isTweakEnabled() || !isEnabled(@"EnableJailbreakBypass")) return env;
 
     NSMutableDictionary *filtered = [env mutableCopy];
-    NSArray *keysToRemove = @[
-        @"DYLD_INSERT_LIBRARIES",
-        @"DYLD_LIBRARY_PATH",
-        @"DYLD_FRAMEWORK_PATH",
-        @"_MSSafeMode",
-        @"_SafeMode",
-        @"SUBSTRATE_SAFE_MODE"
-    ];
-    for (NSString *key in keysToRemove) {
-        [filtered removeObjectForKey:key];
-    }
+    [filtered removeObjectsForKeys:@[@"DYLD_INSERT_LIBRARIES", @"DYLD_LIBRARY_PATH", @"_MSSafeMode"]];
     return filtered;
 }
 
 %end
 
-// ==================== POPUP NOTIFICATION ====================
+// ==================== POPUP ====================
 
 static void showPopup() {
     if (!isEnabled(@"EnablePopup")) return;
@@ -683,16 +584,18 @@ static void showPopup() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         initSpoofedValues();
 
+        NSString *patchStatus = g_memoryPatched ? @"✅ IL2CPP Patched" : @"⏳ Waiting...";
+
         NSString *message = [NSString stringWithFormat:
-            @"GGPoker Bypass v1.1.0 Active!\n\n"
+            @"GGPoker Bypass v1.2.0\n\n"
             @"IDFV: %@\n\n"
+            @"Memory Patch: %@\n"
             @"Jailbreak Bypass: %@\n"
-            @"AppGuard Bypass: %@\n"
-            @"File Hiding: %@",
+            @"AppGuard Bypass: %@",
             g_spoofedIDFVString ?: @"Default",
+            patchStatus,
             isEnabled(@"EnableJailbreakBypass") ? @"ON" : @"OFF",
-            isEnabled(@"EnableAppGuardBypass") ? @"ON" : @"OFF",
-            isEnabled(@"EnableFileHiding") ? @"ON" : @"OFF"];
+            isEnabled(@"EnableAppGuardBypass") ? @"ON" : @"OFF"];
 
         UIAlertController *alert = [UIAlertController
             alertControllerWithTitle:@"GGPoker Bypass"
@@ -701,47 +604,29 @@ static void showPopup() {
 
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 
-        // Find the key window
         UIWindow *window = nil;
-
-        // iOS 13+
         if (@available(iOS 13.0, *)) {
             for (UIWindowScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
                 if (scene.activationState == UISceneActivationStateForegroundActive) {
                     for (UIWindow *w in scene.windows) {
-                        if (w.isKeyWindow) {
-                            window = w;
-                            break;
-                        }
+                        if (w.isKeyWindow) { window = w; break; }
                     }
                     if (window) break;
                 }
             }
         }
-
-        // Fallback
-        if (!window) {
-            window = [[UIApplication sharedApplication] keyWindow];
-        }
+        if (!window) window = [[UIApplication sharedApplication] keyWindow];
         if (!window) {
             NSArray *windows = [[UIApplication sharedApplication] windows];
             for (UIWindow *w in windows) {
-                if (w.isKeyWindow || w.windowLevel == UIWindowLevelNormal) {
-                    window = w;
-                    break;
-                }
+                if (w.isKeyWindow || w.windowLevel == UIWindowLevelNormal) { window = w; break; }
             }
         }
 
-        // Present
         if (window && window.rootViewController) {
             UIViewController *topVC = window.rootViewController;
-            while (topVC.presentedViewController) {
-                topVC = topVC.presentedViewController;
-            }
-            if (topVC) {
-                [topVC presentViewController:alert animated:YES completion:nil];
-            }
+            while (topVC.presentedViewController) topVC = topVC.presentedViewController;
+            if (topVC) [topVC presentViewController:alert animated:YES completion:nil];
         }
     });
 }
@@ -750,42 +635,36 @@ static void showPopup() {
 
 %ctor {
     @autoreleasepool {
-        // Only run for GGPoker
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
 
-        // Support multiple GGPoker bundle IDs
         BOOL isGGPoker = [bundleID isEqualToString:@"com.nsuslab.ggpoker"] ||
                          [bundleID containsString:@"ggpoker"] ||
                          [bundleID containsString:@"ggpcom"] ||
                          [bundleID containsString:@"natural8"];
 
-        if (!isGGPoker) {
-            return;
-        }
+        if (!isGGPoker) return;
 
-        // Load settings first
         loadSettings();
-
         if (!isTweakEnabled()) {
             NSLog(@"[GGPokerBypass] Disabled by settings");
             return;
         }
 
-        NSLog(@"[GGPokerBypass] v1.1.0 Loading for %@...", bundleID);
+        NSLog(@"[GGPokerBypass] ========== v1.2.0 Loading ==========");
+        NSLog(@"[GGPokerBypass] Bundle: %@", bundleID);
 
-        // Initialize paths list
         initJailbreakPaths();
-
-        // Initialize spoofed values
         initSpoofedValues();
-
-        // Clear keychain (once per install)
         clearGGPokerKeychain();
 
-        // Show popup after app launches
+        // Start memory patch attempts (will retry until Unity loads)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            attemptMemoryPatch();
+        });
+
         showPopup();
 
         g_initialized = YES;
-        NSLog(@"[GGPokerBypass] v1.1.0 Loaded successfully!");
+        NSLog(@"[GGPokerBypass] ========== v1.2.0 Initialized ==========");
     }
 }
