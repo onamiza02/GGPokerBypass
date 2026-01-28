@@ -1,14 +1,14 @@
 /*
- * GGPoker Bypass v1.6.0
+ * GGPoker Bypass v1.7.0
  *
- * CRITICAL FIX: AppGuard sends data DIRECTLY to its own server via HTTPS!
- * Endpoint: global-logrecv.appguard.co.kr/npggm/service.do
+ * CRITICAL FIX: Loading screen hangs because game waits for S2Auth callback!
  *
- * Strategy v1.6.0:
- * 1. BLOCK NETWORK to appguard.co.kr (NEW - most important!)
+ * Strategy v1.7.0:
+ * 1. BLOCK NETWORK to appguard.co.kr
  * 2. Block onViolationCallback
- * 3. Clear ViolationCodes queue
+ * 3. Mock onS2AuthTryCallback with SUCCESS (NEW!)
  * 4. Patch IL2CPP memory
+ * 5. File hiding ONLY for exact jailbreak paths (no prefix matching)
  */
 
 #import <UIKit/UIKit.h>
@@ -208,11 +208,31 @@ static void initJailbreakPaths() {
 static BOOL isJailbreakPath(NSString *path) {
     if (!path) return NO;
     initJailbreakPaths();
-    if ([g_jailbreakPaths containsObject:path]) return YES;
-    if ([path hasPrefix:@"/var/jb/"]) return YES;
-    NSString *lower = [path lowercaseString];
-    if ([lower containsString:@"substrate"] || [lower containsString:@"ellekit"] ||
-        [lower containsString:@"frida"] || [lower containsString:@"cycript"]) return YES;
+
+    // Only hide EXACT paths in the set - no prefix matching!
+    // This prevents blocking game resources that might have similar paths
+    if ([g_jailbreakPaths containsObject:path]) {
+        NSLog(@"[GGPokerBypass] 🙈 Hiding exact path: %@", path);
+        return YES;
+    }
+
+    // Only hide specific keywords in path COMPONENTS (not substring matching)
+    NSArray *pathComponents = [path pathComponents];
+    for (NSString *component in pathComponents) {
+        NSString *lower = [component lowercaseString];
+        if ([lower isEqualToString:@"cydia"] ||
+            [lower isEqualToString:@"sileo"] ||
+            [lower isEqualToString:@"substrate"] ||
+            [lower isEqualToString:@"mobilesubstrate"] ||
+            [lower isEqualToString:@"ellekit"] ||
+            [lower isEqualToString:@"frida"] ||
+            [lower isEqualToString:@"cycript"] ||
+            [lower isEqualToString:@"substitute"]) {
+            NSLog(@"[GGPokerBypass] 🙈 Hiding path with jailbreak component: %@", path);
+            return YES;
+        }
+    }
+
     return NO;
 }
 
@@ -363,12 +383,32 @@ static void clearGGPokerKeychain() {
     %orig;
 }
 
-// CRITICAL: Block start() completely to prevent AppGuardInit()!
+// Mock S2Auth callback - game needs this to proceed past loading screen!
+- (void)onS2AuthTryCallback:(NSString *)data {
+    if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
+        NSLog(@"[GGPokerBypass] 🔄 onS2AuthTryCallback intercepted, data: %@", data);
+        // Don't call %orig - we handle this ourselves
+        return;
+    }
+    %orig;
+}
+
+// CRITICAL: Block start() but send fake S2Auth success after delay!
 - (void)start {
     if (isTweakEnabled() && isEnabled(@"EnableAppGuardBypass")) {
-        NSLog(@"[GGPokerBypass] 🔥 IOSAppGuardUnityManager.start() COMPLETELY BLOCKED!");
-        NSLog(@"[GGPokerBypass] 🔥 AppGuardInit() will NOT be called!");
-        // DO NOT call %orig - this prevents native AppGuard initialization!
+        NSLog(@"[GGPokerBypass] 🔥 IOSAppGuardUnityManager.start() - BLOCKING AppGuardInit!");
+        NSLog(@"[GGPokerBypass] 🔥 Will send fake S2Auth SUCCESS after 2 seconds...");
+
+        // Send fake S2Auth success callback after delay
+        // S2AUTH_RESULT_SUCCESS = 1
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            NSLog(@"[GGPokerBypass] ✅ Sending fake S2Auth SUCCESS callback!");
+            // Call the callback with success data
+            // Format from dump.cs: GameGuardEventType.S2Auth.S2AUTH_RESULT_SUCCESS = 1
+            [self onS2AuthTryCallback:@"{\"result\":1}"];
+        });
+
+        // DO NOT call %orig - prevents AppGuardInit()
         return;
     }
     %orig;
@@ -479,12 +519,13 @@ static void showPopup() {
         initSpoofedValues();
 
         NSString *message = [NSString stringWithFormat:
-            @"GGPoker Bypass v1.6.0\n\n"
+            @"GGPoker Bypass v1.7.0\n\n"
             @"IDFV: %@\n\n"
             @"Memory Patch: %@\n"
             @"Network Block: %@\n"
             @"AppGuard Bypass: %@\n\n"
-            @"🚫 Blocking appguard.co.kr",
+            @"🔥 S2Auth Mock Active\n"
+            @"🚫 AppGuard Network Blocked",
             g_spoofedIDFVString ?: @"Default",
             g_memoryPatched ? @"✅" : @"⏳",
             isEnabled(@"EnableNetworkBlock") ? @"✅ ON" : @"❌ OFF",
@@ -533,9 +574,10 @@ static void showPopup() {
         loadSettings();
         if (!isTweakEnabled()) return;
 
-        NSLog(@"[GGPokerBypass] ========== v1.6.0 Loading ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.7.0 Loading ==========");
         NSLog(@"[GGPokerBypass] Bundle: %@", bundleID);
         NSLog(@"[GGPokerBypass] 🚫 NETWORK BLOCKING ENABLED for appguard.co.kr!");
+        NSLog(@"[GGPokerBypass] 🔥 S2Auth Mock ENABLED - fake SUCCESS after 2s");
 
         initBlockedDomains();
         initJailbreakPaths();
@@ -554,6 +596,6 @@ static void showPopup() {
 
         showPopup();
         g_initialized = YES;
-        NSLog(@"[GGPokerBypass] ========== v1.6.0 Initialized ==========");
+        NSLog(@"[GGPokerBypass] ========== v1.7.0 Initialized ==========");
     }
 }

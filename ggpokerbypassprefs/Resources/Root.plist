@@ -9,9 +9,9 @@
             <key>cell</key>
             <string>PSGroupCell</string>
             <key>label</key>
-            <string>GGPoker Bypass v1.6.0</string>
+            <string>GGPoker Bypass v1.7.0</string>
             <key>footerText</key>
-            <string>Network Block + IL2CPP Bypass for Error -34</string>
+            <string>S2Auth Mock + IL2CPP Bypass for Error -34</string>
         </dict>
 
         <!-- Master Toggle -->
