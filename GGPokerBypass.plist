@@ -1,1 +1,1 @@
-{ Filter = { Bundles = ( "com.nsuslab.ggpoker" ); }; }
+{ Filter = { Bundles = ( "com.nsus.ggpcom", "com.nsuslab.ggpoker" ); }; }
